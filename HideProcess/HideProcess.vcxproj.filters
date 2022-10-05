@@ -19,10 +19,10 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="entry.c">
+    <ClCompile Include="entry.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="HideProcess.c">
+    <ClCompile Include="HideProcess.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

