@@ -47,7 +47,7 @@ HANDLE FindProcessIdByName(PCHAR szName)
     PUCHAR ProcessName = NULL;
     PLIST_ENTRY pHead = NULL;
     PLIST_ENTRY pNode = NULL;
-    
+
     ULONG64 ActiveProcessLinksOffset = GetActiveProcessLinksOffset();
     //KdPrint(("ActiveProcessLinksOffset = %llX\n", ActiveProcessLinksOffset));
     if (!ActiveProcessLinksOffset)
@@ -82,14 +82,14 @@ ULONG GetActiveProcessLinksOffset()
     UNICODE_STRING FunName = { 0 };
     RtlInitUnicodeString(&FunName, L"PsGetProcessId");
 
-/*
-.text:000000014007E054                   PsGetProcessId  proc near
-.text:000000014007E054
-.text:000000014007E054 48 8B 81 80 01 00+                mov     rax, [rcx+180h]
-.text:000000014007E054 00
-.text:000000014007E05B C3                                retn
-.text:000000014007E05B                   PsGetProcessId  endp
-*/
+    /*
+    .text:000000014007E054                   PsGetProcessId  proc near
+    .text:000000014007E054
+    .text:000000014007E054 48 8B 81 80 01 00+                mov     rax, [rcx+180h]
+    .text:000000014007E054 00
+    .text:000000014007E05B C3                                retn
+    .text:000000014007E05B                   PsGetProcessId  endp
+    */
 
     PUCHAR pfnPsGetProcessId = (PUCHAR)MmGetSystemRoutineAddress(&FunName);
     if (pfnPsGetProcessId && MmIsAddressValid(pfnPsGetProcessId) && MmIsAddressValid(pfnPsGetProcessId + 0x7))
@@ -112,17 +112,17 @@ ULONG GetProtectionOffset()
     UNICODE_STRING FunName = { 0 };
     RtlInitUnicodeString(&FunName, L"PsIsProtectedProcess");
 
-/*
-.text:0000000140203410                   PsIsProtectedProcess proc near          ; CODE XREF: NtQueryInformationProcess+735¡ýp
-.text:0000000140203410                                                           ; PspAllocateProcess+1E3B¡ýp
-.text:0000000140203410                                                           ; DATA XREF: ...
-.text:0000000140203410 F6 81 7A 08 00 00+                test    byte ptr [rcx+87Ah], 7
-.text:0000000140203410 07
-.text:0000000140203417 B8 00 00 00 00                    mov     eax, 0
-.text:000000014020341C 0F 97 C0                          setnbe  al
-.text:000000014020341F C3                                retn
-.text:000000014020341F                   PsIsProtectedProcess endp
-*/
+    /*
+    .text:0000000140203410                   PsIsProtectedProcess proc near          ; CODE XREF: NtQueryInformationProcess+735¡ýp
+    .text:0000000140203410                                                           ; PspAllocateProcess+1E3B¡ýp
+    .text:0000000140203410                                                           ; DATA XREF: ...
+    .text:0000000140203410 F6 81 7A 08 00 00+                test    byte ptr [rcx+87Ah], 7
+    .text:0000000140203410 07
+    .text:0000000140203417 B8 00 00 00 00                    mov     eax, 0
+    .text:000000014020341C 0F 97 C0                          setnbe  al
+    .text:000000014020341F C3                                retn
+    .text:000000014020341F                   PsIsProtectedProcess endp
+    */
 
     PUCHAR pfnPsIsProtectedProcess = (PUCHAR)MmGetSystemRoutineAddress(&FunName);
     if (pfnPsIsProtectedProcess && MmIsAddressValid(pfnPsIsProtectedProcess) && MmIsAddressValid(pfnPsIsProtectedProcess + 0x10))
@@ -160,8 +160,7 @@ NTSTATUS SetProtectionStatus(PEPROCESS Process)
 
 ULONG64 FindPattern(ULONG64 base, SIZE_T size, PCHAR pattern, PCHAR mask)
 {
-    ULONG64 patternSize = 0;
-    patternSize = strlen(mask);
+    const auto patternSize = strlen(mask);
 
     for (size_t i = 0; i < size - patternSize; i++) {
         for (size_t j = 0; j < patternSize; j++) {
@@ -186,8 +185,8 @@ PVOID GetExpLookupHandleTableEntryFunc()
     pfnPsLookupProcessByProcessId = (PUCHAR)MmGetSystemRoutineAddress(&FunName);
 
     PUCHAR found = (PUCHAR)FindPattern((ULONG64)pfnPsLookupProcessByProcessId, 0x1000,
-        "\x66\xFF\x8F\x00\x00\x00\x00\xB2\x03\xE8\x00\x00\x00\x00\x48\x8B\xD8\x48\x85\xC0\x74\x35",
-        "xxx????xxx????xxxxxxxx");
+        "\x66\xFF\x8F\x00\x00\x00\x00\xB2\x03\xE8\x00\x00\x00\x00\x48\x8B\xD8\x48\x85\xC0",
+        "xxx????xxx????xxxxxx");
     if (!found)
         return NULL;
     pfnPspReferenceCidTableEntry = (found + 9) + *(PLONG)(found + 10) + 5;
@@ -212,18 +211,18 @@ PVOID GetPspCidTable()
     pfnPsLookupProcessByProcessId = (PUCHAR)MmGetSystemRoutineAddress(&FunName);
 
     PUCHAR found = (PUCHAR)FindPattern((ULONG64)pfnPsLookupProcessByProcessId, 0x1000,
-        "\x66\xFF\x8F\x00\x00\x00\x00\xB2\x03\xE8\x00\x00\x00\x00\x48\x8B\xD8\x48\x85\xC0\x74\x35",
-        "xxx????xxx????xxxxxxxx");
+        "\x66\xFF\x8F\x00\x00\x00\x00\xB2\x03\xE8\x00\x00\x00\x00\x48\x8B\xD8\x48\x85\xC0",
+        "xxx????xxx????xxxxxx");
     if (!found)
         return NULL;
     pfnPspReferenceCidTableEntry = (found + 9) + *(PLONG)(found + 10) + 5;
     found = (PUCHAR)FindPattern((ULONG64)pfnPspReferenceCidTableEntry, 0x1000,
-        "\x48\x85\xC0\x0F\x84\x00\x00\x00\x00\x4C\x8B\x35\x00\x00\x00\x00\x0F\x0D\x08",
-        "xxxxx????xxx????xxx");
+        "\x48\x83\xEC\x00\x48\x8B\x05\x00\x00\x00\x00\x0F\xB6\xEA\xF7\xC1\x00\x00\x00\x00\x0F\x84",
+        "xxx?xxx????xxxxx????xx");
     if (!found)
         return NULL;
 
-    PspCidTable = (found + 9) + *(PLONG)(found + 0xC) + 7;
+    PspCidTable = (found + 4) + *(PLONG)(found + 7) + 7;
     return PspCidTable;
 }
 
@@ -290,18 +289,22 @@ NTSTATUS HideProcessByProcessId(HANDLE ProcessId)
     KdPrint(("CidTableItem = %p\n", CidTableItem));
 
     KeEnterCriticalRegion();
+
     memset(CidTableItem, 0, 0x10);   //Wipe Handle in PspCidTable
     //SetProtectionStatus(Process);
     *(UCHAR*)((ULONG64)Process - 0x15) = 0x4;   //ObjectHeader.Flags.KernelOnlyAccess = 1
-
     //RemoveEntryList((PLIST_ENTRY)((PUCHAR)Process + ActiveProcessLinksOffset));
     //InitializeListHead((PLIST_ENTRY)((PUCHAR)Process + ActiveProcessLinksOffset));  //SelfConnected
 
-    *(PULONG64)((PUCHAR)Process + ActiveProcessLinksOffset - 8) = 0x0;    //ProcessId 
     //Will trigger BSOD if pid not exist on Win7
     *(PULONG64)((PUCHAR)Process + ActiveProcessLinksOffset - 8) = 0x0;    //ProcessId 
+
     KeLeaveCriticalRegion();
+
+    return TRUE;
+
     ObDereferenceObject(Process);
+
     return status;
 }
 
